@@ -56,8 +56,9 @@ contract AirlineManagement {
     string public airlineName;
     // Total amount received for all flights
     uint private airlineBalance;
-    Ticket private _ticketDetail;
+   // Ticket private _ticketDetail;
     address payable private _account4Airline;
+    address payable private _account4Cust;
     address payable airlineAdmin = payable(0);
         // Total panelty paid for all flights
     uint private totalPenaltyAmount;
@@ -139,7 +140,7 @@ contract AirlineManagement {
         flight.flightNumber = _flightNumber;
         flight.source = _source;
         flight.destination = _destination;
-        flight.basePrice = 1000000000000000000;//_fixedBasePrice;
+        flight.basePrice = 10000000000000000000;
         flight.departureTime = block.timestamp + (_departureTime * 1 hours);
         flight.arrivalTime = block.timestamp + (_arrivalTime * 1 hours); 
     
@@ -182,7 +183,7 @@ contract AirlineManagement {
                 destination: flight.destination,
                 schedDep: flight.departureTime,
                 schedArr: flight.arrivalTime,
-                totalFare: 1000000000000000000,
+                totalFare: 10000000000000000000,
                 isFarePaid: false,
                 createTime: block.timestamp,
                 ticketStatus: TicketStatus.CREATED,
@@ -195,8 +196,9 @@ contract AirlineManagement {
         flight.ticketExists[ticket.ticketID] = true;
         bookingHistory[msg.sender].push(ticket);
         uint index = bookingHistory[msg.sender].length;
+          console.log("--Item in booking History is --", index) ;
         reserveSeat(flightNo, index,ticket);
-        require(msg.value == ticket.totalFare, "Error: Not sufficient amount to book");
+        require(msg.value >= ticket.totalFare, "Error: Not sufficient amount to book");
 
         //_account4Airline.transfer(msg.value);
 
@@ -205,7 +207,7 @@ contract AirlineManagement {
         
         emit TicketConfirmed(ticket.totalFare, ticket.ticketID);
 
-        console.log("----------") ;
+      
         emit TicketBooked(__ticketID);
     }
 
@@ -249,11 +251,17 @@ contract AirlineManagement {
         
         uint totalFare = ticket.totalFare;
         uint penalty = _calcCancelPenalty(ticket, totalFare);
-        console.log("balance ticket while cancellation=",address(this).balance);
+        console.log("balance ticket while cancellation=",address(this).balance, " penalty :" , penalty);
         
         //makepayment()
-        payable(msg.sender).transfer(totalFare - penalty);
-        _account4Airline.transfer(penalty);
+
+        _account4Cust = payable(msg.sender);
+        (bool success, ) = _account4Cust.call{value: totalFare - penalty}("");
+        require(success, "Failed to refund to customer while cancellation");
+        (bool success1, ) = airlineAdmin.call{value: penalty}("");
+        require(success1, "Failed to send  Ether tp airline in case of cancellation");
+       //payable(msg.sender).transfer(totalFare - penalty);
+       // _account4Airline.transfer(penalty);
        
 
         ticket.ticketStatus = TicketStatus.CANCELLED;
@@ -271,6 +279,10 @@ contract AirlineManagement {
         flight.totalPassengers -= 1;
     }
  
+    function updateArrivalTime(uint schedArr) public {
+        
+    }
+ 
     function _4_claimRefund(uint flightNumber) external payable  onlyValidCustomer() {
         Ticket memory ticket = bookingHistory[msg.sender][0];
         require(ticket.ticketStatus != TicketStatus.SETTLED && ticket.ticketStatus != TicketStatus.CANCELLED,"Error: This ticket has already been settled");
@@ -278,7 +290,7 @@ contract AirlineManagement {
         Flight storage flight = allFlightDetailsMap[flightNumber];
         
 
-        uint schedArr = _ticketDetail.schedArr;
+        uint schedArr = ticket.schedArr;
         //1 days 
         if((block.timestamp + (schedArr * 1 hours)) +  (1 days) > block.timestamp) {
             revert("Error: Cannot settle  refund before 24 hours past scheduled arrival");
@@ -287,16 +299,22 @@ contract AirlineManagement {
         console.log("balance in contract while refund=",address(this).balance);
          uint totalFare = ticket.totalFare;
 
+
         if(flight.flightStatus  != FlightStatus.ARRIVED && flight.flightStatus  == FlightStatus.CANCELLED) {
-            payable(msg.sender).transfer(totalFare);
+            _account4Cust = payable(msg.sender);
+            (bool success, ) = _account4Cust.call{value: totalFare}("");
+          
             ticket.ticketStatus = TicketStatus.SETTLED;
             emit TicketSettled(ticket.ticketID);
         }
         else{
             uint penalty = _calcDelayPenalty(ticket, totalFare);
 
-            payable(msg.sender).transfer(totalFare - penalty);
-            _account4Airline.transfer(penalty);
+            _account4Cust = payable(msg.sender);
+            (bool success, ) = _account4Cust.call{value: totalFare}("");
+            require(success, "Failed to refund to customer while refundclaim");
+            (bool success1, ) = airlineAdmin.call{value: penalty}("");
+            require(success1, "Failed to send  Ether tp airline in case of refundclaim");
             ticket.ticketStatus = TicketStatus.SETTLED;
             emit TicketSettled(ticket.ticketID);
         }
@@ -322,7 +340,7 @@ contract AirlineManagement {
         Flight storage flight = allFlightDetailsMap[_flightNumber];
         
 
-        uint schedArr = _ticketDetail.schedArr;
+        uint schedArr = ticket.schedArr;
         if((block.timestamp + (schedArr * 1 hours))  > block.timestamp) {
             revert("Error: Cannot settle before scheduled arrival");
         }
@@ -330,23 +348,28 @@ contract AirlineManagement {
         console.log("balance ticket while settlement=",address(this).balance);
         uint totalFare = ticket.totalFare;
         address payable _account4Customer = ticket.customer;
+
         
         if(flight.flightStatus == FlightStatus.CANCELLED) {
-            _account4Customer.transfer(totalFare);
+            (bool success, ) = _account4Cust.call{value: totalFare}("");
+            require(success, "Failed to refund to customer for cancelled flight ");
             ticket.ticketStatus = TicketStatus.SETTLED;
             emit TicketSettled(ticket.ticketID);
         }
 
-        if(flight.flightStatus != FlightStatus.ARRIVED) {
+        else if (flight.flightStatus != FlightStatus.ARRIVED) {
             revert("Error: Flight has not arrived yet");
         }
 
         uint delayPenalty = _calcDelayPenalty(ticket, totalFare);
         if(delayPenalty == 0) {
-            _account4Airline.transfer(totalFare);
+             (bool success1, ) = airlineAdmin.call{value: totalFare}("");
+            
         } else {
-            _account4Airline.transfer(totalFare-delayPenalty);
-            _account4Customer.transfer(delayPenalty);
+            (bool success, ) = _account4Cust.call{value: delayPenalty}("");
+            require(success, "Failed to refund to customer when flightDelayed");
+            (bool success1, ) = airlineAdmin.call{value: totalFare-delayPenalty}("");
+            require(success1, "Failed to send  Ether to airline when flightDelayed");
         }
 
         ticket.ticketStatus = TicketStatus.SETTLED;
@@ -460,6 +483,10 @@ contract AirlineManagement {
         }
         
         return penaltyPercent;
+    }
+
+    function getbalance(address add) public returns(uint balance){
+        return add.balance;
     }
 
 
