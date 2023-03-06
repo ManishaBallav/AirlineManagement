@@ -118,7 +118,7 @@ contract AirlineManagement {
 
     constructor (string memory _airlineName) {
         airlineName = _airlineName;
-        _account4Airline = payable(msg.sender);
+        
         airlineBalance = 0;
         totalPenaltyAmount = 0;
         airlineAdmin = payable(msg.sender);
@@ -132,7 +132,7 @@ contract AirlineManagement {
 
     function _0_addFlight(uint _flightNumber, string memory _source, string memory _destination,
      uint256 _departureTime, uint256 _arrivalTime) public onlyAirline { //uint _fixedBasePrice,bool _activeStatus
-
+       // _account4Airline = payable(address(this));
         //departureTIme = block.timestamp + inputParameter * Hours
 
         Flight storage flight = allFlightDetailsMap[_flightNumber];
@@ -159,6 +159,12 @@ contract AirlineManagement {
     function _1_addCustomerAccount() public { 
         address custAccount = payable(msg.sender);
         customers.push(custAccount);
+       // console.log(msg.sender + ":" + flightNumber_ + ":"  + _airlineContract + ":" +_airlineAccount + ":"+ _customerAccount);
+    
+    }
+
+    function _1_addContractccount(address payable add) public { 
+        address _account4Airline = add;
        // console.log(msg.sender + ":" + flightNumber_ + ":"  + _airlineContract + ":" +_airlineAccount + ":"+ _customerAccount);
     
     }
@@ -191,19 +197,25 @@ contract AirlineManagement {
         console.log("----Airline----CreateTicket----",msg.sender);
 
         flight.allTicketsInTheFlight.push(ticket);
-        //flight.ticketExists[ticket] = true;
+        flight.ticketExists[ticket.ticketID] = true;
         bookingHistory[msg.sender].push(ticket);
         uint index = bookingHistory[msg.sender].length;
         reserveSeat(flightNo, index,ticket);
         require(msg.value == ticket.totalFare, "Error: Not sufficient amount to book");
-         airlineAdmin.transfer(msg.value); 
+
+        //_account4Airline.transfer(msg.value);
+
+        bookingHistory[msg.sender][index-1].isFarePaid = true;
+        bookingHistory[msg.sender][index-1].ticketStatus = TicketStatus.CONFIRMED;
+        
+        emit TicketConfirmed(ticket.totalFare, ticket.ticketID);
 
         console.log("----------") ;
         emit TicketBooked(__ticketID);
     }
 
 
-    function reserveSeat(uint _flightNumber, uint index , Ticket memory _ticket) private  returns(uint sn) {
+    function reserveSeat(uint _flightNumber, uint index , Ticket memory _ticket) private returns(uint8 sn) {
         Flight storage flight = allFlightDetailsMap[_flightNumber];
         console.log("Inside  Airline completeReservation ------msg.sender",msg.sender, "flightNos", _flightNumber);
         require(flight.ticketExists[_ticket.ticketID] == true, "Error: Ticket not associated with this flight");
@@ -219,12 +231,9 @@ contract AirlineManagement {
         console.log("seat nos is ---->", _seatNumber);
         flight.reservedSeats[_seatNumber] = msg.sender;
         flight.totalPassengers += 1;
-        
-        bookingHistory[msg.sender][index].ticketStatus = TicketStatus.CONFIRMED;
-         bookingHistory[msg.sender][index].isFarePaid = true;
-        emit TicketConfirmed(_ticket.totalFare, _ticket.ticketID);
+        _ticket.seatNumber = _seatNumber;
          
-        return _ticketDetail.seatNumber;
+        return _seatNumber;
     }
      //TODO : check also custome have flight nos mapped to it or ticket with it 
     function _3_cancelTicket(uint flightNumber) public payable onlyValidCustomer() {
