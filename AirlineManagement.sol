@@ -356,31 +356,31 @@ contract AirlineManagement {
         emit StatusUpdated(_flightNumber, _flightStatus, msg.sender);
     }
 
-    function _1_flightOnTime(uint _flightNumber) public
+    function flightOnTime(uint _flightNumber) public
     validateFlightStatus(_flightNumber, FlightStatus.ONTIME){
         updateStatus(_flightNumber, FlightStatus.ONTIME);
     }
 
-    function _2_flightDelayed(uint _flightNumber) public 
+    function flightDelayed(uint _flightNumber) public 
     flightNotCancelled(_flightNumber) flightNotArrived(_flightNumber) 
     flightNotDeparted(_flightNumber) validateFlightStatus(_flightNumber, FlightStatus.DELAYED){
         updateStatus(_flightNumber, FlightStatus.DELAYED);
     }
     
-    function _3_flightCancelled(uint _flightNumber) public 
+    function flightCancelled(uint _flightNumber) public 
     flightNotArrived(_flightNumber) flightNotDeparted(_flightNumber) 
     validateFlightStatus(_flightNumber, FlightStatus.CANCELLED){
         updateStatus(_flightNumber, FlightStatus.CANCELLED);
         _5_settleAllTicket(_flightNumber);
     }
 
-    function _4_flightDeparted(uint _flightNumber) public 
+    function flightDeparted(uint _flightNumber) public 
     flightNotArrived(_flightNumber)
     validateFlightStatus(_flightNumber, FlightStatus.DEPARTED){
         updateStatus(_flightNumber, FlightStatus.DEPARTED);
     }
 
-    function _5_flightArrived(uint _flightNumber) public
+    function flightArrived(uint _flightNumber) public
     validateFlightStatus(_flightNumber, FlightStatus.ARRIVED){
         updateStatus(_flightNumber, FlightStatus.ARRIVED);
         _5_settleAllTicket(_flightNumber);
