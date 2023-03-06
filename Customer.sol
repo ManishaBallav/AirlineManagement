@@ -30,14 +30,29 @@ contract Customer {
         //ticket = TicketMgt(ticketContract);
    
     }
+    
+    function makePayment(address contractAccount) public payable {
+        // Two Ways to solve the Issue
 
-    function makePayment(address  contractAccount )public payable{
-        
-       // AirlineManagement contractInst = AirlineManagement(contractAccount);
-        //contractInst.depositMoney();
-        (bool sent, bytes memory data) = contractAccount.call{value:  msg.value}("");
-        require(sent, "Failed to send Ether");
+        // Option 1 : Using Contract Instance     
+        AirlineManagement contractInst = AirlineManagement(contractAccount);
+        contractInst.depositMoney{value: msg.value}();
+
+
+        // Option 2: Using Generic Call function to send Any Transaction
+        // (bool sent, ) = contractAccount.call{
+        //     value: msg.value
+        // }(abi.encodeWithSignature("depositMoney()"));
+        // require(sent, "Failed to send Ether");
     }
+
+   // function makePayment(address  contractAccount )public payable{
+    //    
+    //   // AirlineManagement contractInst = AirlineManagement(contractAccount);
+     //   //contractInst.depositMoney();
+      //  (bool sent, bytes memory data) = contractAccount.call{value:  msg.value}("");
+     //   require(sent, "Failed to send Ether");
+    //}
     
     function withDrawPayment(address _ticketadd, address _airlineAccnt)public {
 
