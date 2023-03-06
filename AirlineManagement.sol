@@ -163,11 +163,6 @@ contract AirlineManagement {
     
     }
 
-    function _1_addContractccount(address payable add) public { 
-        address _account4Airline = add;
-       // console.log(msg.sender + ":" + flightNumber_ + ":"  + _airlineContract + ":" +_airlineAccount + ":"+ _customerAccount);
-    
-    }
 
     function _2_bookTicket(uint flightNo) public payable {
         customers.push(msg.sender);
