@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "hardhat/console.sol";
 
-contract AirlineManagement {
+contract AirlineMgt{
 
 
     event AirlineCreated(string _airlineName);
@@ -16,6 +16,7 @@ contract AirlineManagement {
     event TicketConfirmed(uint fareAmount, uint ticketid);
     event TicketCancelled(uint ticketid);
     event TicketSettled(uint ticketid);
+    //event Ticketbooked(Ticket ticket);
 
     enum FlightStatus {SCHEDULED, ONTIME, DELAYED, CANCELLED, DEPARTED, ARRIVED}
 
@@ -36,6 +37,7 @@ contract AirlineManagement {
         mapping(uint => bool) ticketExists;
         FlightStatus flightStatus;
         mapping(uint8 => address) reservedSeats;
+        bool delayed;
 
     }   
 
@@ -71,6 +73,7 @@ contract AirlineManagement {
 
     uint[] private allFlights;
     address[] private customers;
+    bool isTestMode = false;
 
 
     //flightNos -> FlightDetails
@@ -101,18 +104,17 @@ contract AirlineManagement {
         _;
 }
 
-    modifier flightNotCancelled(uint _flightNumber){
-        require (allFlightDetailsMap[_flightNumber].flightStatus != FlightStatus.CANCELLED, "Can't change status, as current status is cancelled.");
-        _;
-    }
+
     modifier flightNotArrived(uint _flightNumber){
         require (allFlightDetailsMap[_flightNumber].flightStatus != FlightStatus.ARRIVED, "Can't change status, as current status is arrived.");
         _;
     }
-    modifier flightNotDeparted(uint _flightNumber){
-        require (allFlightDetailsMap[_flightNumber].flightStatus != FlightStatus.DEPARTED, "Can't change status, as current status is departed.");
+    modifier validateFlightStatus(uint _flightNumber,  FlightStatus status){
+        require (allFlightDetailsMap[_flightNumber].flightStatus != status, "Flight Status is already updated.");
+        require (allFlightDetailsMap[_flightNumber].flightStatus < status, "Flight Status is not modifiable to previous state.");
         _;
     }
+ 
    
    //-------------------------------------------------------constrcutor--------------------------------------------------------------------------------
 
@@ -171,6 +173,10 @@ contract AirlineManagement {
         address cust = msg.sender;
 
         Flight storage flight = allFlightDetailsMap[flightNo];
+        if(flight.flightStatus == FlightStatus.CANCELLED ||  flight.flightStatus == FlightStatus.DEPARTED || flight.flightStatus == FlightStatus.ARRIVED){
+             revert("Cannot book ticket as flight cancelled or departed or arrived");
+        }
+        
         require(flight.totalPassengers < flight.totalSeats, "Error: No seats available");
         ticketCount += 1 ;
        // string memory __ticketID =  concatenate(flightNo,ticketCount ) ;
@@ -239,26 +245,41 @@ contract AirlineManagement {
          
         return _seatNumber;
     }
-     //TODO : check also custome have flight nos mapped to it or ticket with it 
+
+    function getCustBookingByFlightNumber(address cust, uint _flightNumber) public view returns (Ticket memory) {
+    Ticket memory custTicket ;
+    for (uint i = 0; i < bookingHistory[cust].length; i++) {
+        if (bookingHistory[msg.sender][i].flightNumber == _flightNumber) {
+           custTicket = bookingHistory[msg.sender][i];
+          // emit Ticketbooked(custTicket);
+           return custTicket;
+        }
+    }
+
+}
+
     function _3_cancelTicket(uint flightNumber) public payable onlyValidCustomer() {
 
-        Ticket  memory ticket = bookingHistory[msg.sender][0];
+       // Ticket  memory ticket = bookingHistory[msg.sender][0];
+       Ticket memory ticket = getCustBookingByFlightNumber (msg.sender, flightNumber);
         require(ticket.ticketStatus == TicketStatus.CONFIRMED, "Error: Ticket is already cancelled or settled or not confirmed");
 
         Flight storage flight = allFlightDetailsMap[flightNumber];
+
        
-        if(flight.flightStatus == AirlineManagement.FlightStatus.ARRIVED || flight.flightStatus == AirlineManagement.FlightStatus.DEPARTED) {
+        if(flight.flightStatus == AirlineMgt.FlightStatus.ARRIVED || flight.flightStatus == AirlineMgt.FlightStatus.DEPARTED) {
             revert("Error: Cannot cancel after departure or arrival");
         }
 
         uint schedDep = ticket.schedDep;
-        
-        //if((block.timestamp + (schedDep * 1 hours)) - (2 * 1 hours) < block.timestamp) {
-          //  revert("Error: Cannot cancel within two hours of departure");
-        //}
+          if(isTestMode){
+              console.log("testMode ON not chekcing 2 hr to departure for cancellation");
+          }
+          else{
         if(schedDep - block.timestamp < 2 hours) {
             revert("Error: Cannot cancel within two hours of departure");
         }
+          }
         
         uint totalFare = ticket.totalFare;
         uint penalty = _calcCancelPenalty(ticket, totalFare);
@@ -271,8 +292,6 @@ contract AirlineManagement {
         require(success, "Failed to refund to customer while cancellation");
         (bool success1, ) = airlineAdmin.call{value: penalty}("");
         require(success1, "Failed to send  Ether tp airline in case of cancellation");
-       //payable(msg.sender).transfer(totalFare - penalty);
-       // _account4Airline.transfer(penalty);
        
 
         ticket.ticketStatus = TicketStatus.CANCELLED;
@@ -290,35 +309,44 @@ contract AirlineManagement {
         flight.totalPassengers -= 1;
     }
   
- // Calim refund in case of cancellation or delay by airline , and if not settled by airline
 
+
+    //cancellation by airline : test how diff from settle and claim refund
+    //delay percent 
+    //If the airline hasn’t updated the status within 24 hours of the flight departure time, and a customer claim is made, 
+    //it should be treated as an airline cancellation case by the contract.:TODO
     function _4_claimRefund(uint flightNumber) external payable  onlyValidCustomer() {
-        Ticket memory ticket = bookingHistory[msg.sender][0];
+        Ticket memory ticket = getCustBookingByFlightNumber(msg.sender, flightNumber);
         require(ticket.ticketStatus != TicketStatus.SETTLED && ticket.ticketStatus != TicketStatus.CANCELLED,"Error: This ticket has already been settled");
 
         Flight storage flight = allFlightDetailsMap[flightNumber];
-        
 
-       // uint schedArr = ticket.schedArr;
         uint actArr = ticket.actArr;
+        if(isTestMode){
+            console.log("testMode ON not chekcing 24 hr from arrival");
+        }
+        else {
          if(actArr +  (24 * 1 hours)  > block.timestamp) {
             revert("Error: Cannot settle  refund before 24 hours past scheduled arrival");
         }
+        }
 
         console.log("balance in contract while refund=",address(this).balance);
-        uint totalFare = ticket.totalFare;
+         uint totalFare = ticket.totalFare;
 
-       //If the airline hasn’t updated the status within 24 hours of the flight departure time, and a customer claim is made, 
-       //it should be treated as an airline cancellation case by the contract.
-        if(flight.flightStatus  != FlightStatus.ARRIVED) {
+
+        //if airline do not send update with 24 hours of departure then customer can calim refund 100% i.e. If the airline hasn’t updated the status within 24 hours of the flight departure time, and a customer claim is made, 
+        //                                                                                                  it should be treated as an airline cancellation case by the contract
+        if(flight.flightStatus  != FlightStatus.ARRIVED &&  flight.flightStatus  != FlightStatus.DELAYED ) {
+
             _account4Cust = payable(msg.sender);
             (bool success, ) = _account4Cust.call{value: totalFare}("");
           
             ticket.ticketStatus = TicketStatus.SETTLED;
             emit TicketSettled(ticket.ticketID);
         }
-
-     //Refund claim in case flight was  delayed and customer initaite refund 
+        //TODO Check: Done after 24 after arrival  if payment was not transfered due to some reason , customer can claim the money 
+        else if (flight.flightStatus  == FlightStatus.DELAYED ){
             uint penalty = _calcDelayPenalty(ticket, totalFare);
 
             _account4Cust = payable(msg.sender);
@@ -328,17 +356,15 @@ contract AirlineManagement {
             require(success1, "Failed to send  Ether tp airline in case of refundclaim");
             ticket.ticketStatus = TicketStatus.SETTLED;
             emit TicketSettled(ticket.ticketID);
-        
+        }
         
     }
 
     function _5_settleAllTicket(uint _flightNumber) internal onlyAirline {
-        console.log("inside settleTicketForAll");
         Ticket[] memory ticketsToBeSetteled = allFlightDetailsMap[_flightNumber].allTicketsInTheFlight;
         Ticket  memory ticket ;
         for (uint i=0; i<ticketsToBeSetteled.length; i++){
             ticket = ticketsToBeSetteled[i];
-             console.log("caling  settleTicket for ", ticket.ticketID);
             settleTicket(ticket, _flightNumber);
             
         }
@@ -349,49 +375,48 @@ contract AirlineManagement {
     function settleTicket(Ticket memory ticket,uint _flightNumber) public payable onlyAirline {
         require(ticket.ticketStatus != TicketStatus.SETTLED && ticket.ticketStatus != TicketStatus.CANCELLED, 
         "Error: This ticket has already been settled");
-         console.log("inside  settleTicket for  flightt", _flightNumber);
         Flight storage flight = allFlightDetailsMap[_flightNumber];
         
 
        // uint schedArr = ticket.schedArr;
         uint actArr = ticket.actArr;
-         console.log("actArr :", actArr, "   currentime :", block.timestamp);
 
+        if(isTestMode){
+            console.log("testMode ON not chekcing 24 hr from arrival");
+        }
+        else {
         if(actArr  > block.timestamp) {
             revert("Error: Cannot settle before scheduled arrival");
+        }
         }
 
         console.log("balance ticket while settlement=",address(this).balance);
         uint totalFare = ticket.totalFare;
-        address payable _account4Customer = ticket.customer;
+        address payable customerAcc = ticket.customer;
 
-        
+    // Cancellation by airline         
         if(flight.flightStatus == FlightStatus.CANCELLED) {
-            (bool success, ) = _account4Customer.call{value: totalFare}("");
+            console.log("flight CANCELLED, pay to customerAcc  :" ,customerAcc , " : " ,totalFare);
+            (bool success, ) = customerAcc.call{value: totalFare}("");
             require(success, "Failed to refund to customer for cancelled flight ");
             ticket.ticketStatus = TicketStatus.SETTLED;
             emit TicketSettled(ticket.ticketID);
         }
-
-        //Before settling for delay check if flightArrived
-         if (flight.flightStatus != FlightStatus.ARRIVED) {
-            revert("Error: Flight has not arrived yet");
+        else if (flight.flightStatus != FlightStatus.ARRIVED) {
+                revert("Error: Flight has not arrived yet");
         }
-
-    // Settlement in case of Flight Arrived , with delay or 0 delay
-
-        uint delayPenalty = _calcDelayPenalty(ticket, totalFare);
-        if(delayPenalty == 0) {
-            (bool success1, ) = airlineAdmin.call{value: totalFare-delayPenalty}("");
-        } else {
-            (bool success, ) = _account4Customer.call{value: delayPenalty}("");
+        // It will cover 2 scenarion , 1) No delay - happy day scenarion flight arrived on time  i.e delay =0,
+        //.                            2) with Delay = n , ie flight got delayed and airline is calling settlement after arrival, 
+        //                                                 if in case airline doesnt call settlement or thr failure , customer can make claim for same 
+        else {uint delayPenalty = _calcDelayPenalty(ticket, totalFare);
+             (bool success, ) = customerAcc.call{value: delayPenalty}("");
             require(success, "Failed to refund to customer when flightDelayed");
             (bool success1, ) = airlineAdmin.call{value: totalFare-delayPenalty}("");
             require(success1, "Failed to send  Ether to airline when flightDelayed");
-        }
 
-        ticket.ticketStatus = TicketStatus.SETTLED;
-        emit TicketSettled(ticket.ticketID);
+            ticket.ticketStatus = TicketStatus.SETTLED;
+            emit TicketSettled(ticket.ticketID);
+            }
     }
 //---------------------------------------------------- view flight or airline details ------------------------------------------------------------
 
@@ -405,47 +430,47 @@ contract AirlineManagement {
     }
     // Getter for Flight Status - END
 
+ 
 //-------------------------------------------------------- update STATUS OF FLIGHT  -----------------------------------------------------------------------
 
 
-    function updateStatus(uint _flightNumber, uint _flightStatus) public onlyAirline {
-        //{SCHEDULED, ONTIME, DELAYED, CANCELLED, DEPARTED, ARRIVED}
-        // 0,1,2,3,4,5 
-        console.log("status ");
-        if(_flightStatus == 0){
-            allFlightDetailsMap[_flightNumber].flightStatus = FlightStatus.ONTIME;
+     function updateStatus(uint _flightNumber, FlightStatus _flightStatus) public onlyAirline {
+        allFlightDetailsMap[_flightNumber].flightStatus = _flightStatus;
+        if(allFlightDetailsMap[_flightNumber].flightStatus == FlightStatus.DELAYED){
+            allFlightDetailsMap[_flightNumber].delayed = true;
         }
-        if(_flightStatus == 1 ){
-            require (allFlightDetailsMap[_flightNumber].departureTime - 24 hours < block.timestamp , "Can update status  within 24 hours of departure");
-            require (allFlightDetailsMap[_flightNumber].flightStatus < FlightStatus.DELAYED, "Flight Status is not modifiable to previous state.");
-
-            allFlightDetailsMap[_flightNumber].flightStatus = FlightStatus.DELAYED;
-        }
-        if(_flightStatus == 2){
-            require (allFlightDetailsMap[_flightNumber].departureTime - 24 hours < block.timestamp , "Can update status  within 24 hours of departure");
-            require (allFlightDetailsMap[_flightNumber].flightStatus < FlightStatus.CANCELLED, "Flight Status is not modifiable to previous state.");
-
-            allFlightDetailsMap[_flightNumber].statusUpdateTime = block.timestamp;
-            allFlightDetailsMap[_flightNumber].flightStatus = FlightStatus.CANCELLED;
-            _5_settleAllTicket(_flightNumber);
-        }
-        if(_flightStatus == 3){
-            require (allFlightDetailsMap[_flightNumber].flightStatus < FlightStatus.DEPARTED, "Flight Status is not modifiable to previous state.");
-
-            allFlightDetailsMap[_flightNumber].flightStatus = FlightStatus.DEPARTED;
-        }
-        if(_flightStatus == 4){
-            require (allFlightDetailsMap[_flightNumber].flightStatus < FlightStatus.ARRIVED, "Flight Status is not modifiable to previous state.");
-
-            allFlightDetailsMap[_flightNumber].flightStatus = FlightStatus.ARRIVED;
-            _5_settleAllTicket(_flightNumber);
-        }
-
-        emit StatusUpdated(_flightNumber, allFlightDetailsMap[_flightNumber].flightStatus, msg.sender);
+        emit StatusUpdated(_flightNumber, _flightStatus, msg.sender);
     }
 
-//Update Flight Arrival time and Ticket Actual Arrival Time 
-//......(using actual arrival time only for testing purpose otherwise only need to update flight arrivale time ).....
+    function flightOnTime(uint _flightNumber) public
+    validateFlightStatus(_flightNumber, FlightStatus.ONTIME){
+        updateStatus(_flightNumber, FlightStatus.ONTIME);
+    }
+
+    function flightDelayed(uint _flightNumber) public 
+    validateFlightStatus(_flightNumber, FlightStatus.DELAYED){
+        updateStatus(_flightNumber, FlightStatus.DELAYED);
+    }
+    
+    function flightCancelled(uint _flightNumber) public 
+    validateFlightStatus(_flightNumber, FlightStatus.CANCELLED){
+        updateStatus(_flightNumber, FlightStatus.CANCELLED);
+        _5_settleAllTicket(_flightNumber);
+    }
+
+    function flightDeparted(uint _flightNumber) public 
+    flightNotArrived(_flightNumber)
+    validateFlightStatus(_flightNumber, FlightStatus.DEPARTED){
+        updateStatus(_flightNumber, FlightStatus.DEPARTED);
+    }
+
+    function flightArrived(uint _flightNumber) public
+    validateFlightStatus(_flightNumber, FlightStatus.ARRIVED){
+        updateStatus(_flightNumber, FlightStatus.ARRIVED);
+        //
+        _5_settleAllTicket(_flightNumber);
+    }
+
     function flightDelayedBy(uint _flightNumber, uint delayTime) public onlyAirline  {
         console.log("update flight arrival time and ticket dept/arrival time  ");
         allFlightDetailsMap[_flightNumber].arrivalTime = getArrTime(_flightNumber) + (delayTime * 1 hours);
@@ -455,33 +480,25 @@ contract AirlineManagement {
         for (uint i=0; i<ticketsToBeSetteled.length; i++){
             ticket = ticketsToBeSetteled[i];
            // ticket.actDep = block.timestamp +ticket.actDep + (delayFlightBy* 1 hours);
-            ticket.actDep = ticket.actDep + (delayTime* 1 hours);
-            ticket.actArr = ticket.actArr + (delayTime* 1 hours);
+            ticket.actDep = ticket.schedDep + (delayTime* 1 hours);
+            ticket.actArr = ticket.schedArr + (delayTime* 1 hours);
+            ticketsToBeSetteled[i] = ticket;
+            console.log("Time updated to :", ticket.actArr);
             
         }
     }
 
 //--------------------------------------------------------------------------function to test delay , cancel and arrival-----------------------------------------------------
 
-
-    function updateFutureTimeForTesting(uint _flightNumber, uint time) public {
-        Ticket[] storage ticketsToBeSetteled = allFlightDetailsMap[_flightNumber].allTicketsInTheFlight;
-        for (uint i=0; i<ticketsToBeSetteled.length; i++){
-
-            Ticket memory ticket = ticketsToBeSetteled[i];
-            ticket = ticketsToBeSetteled[i];
-            ticket.actDep = block.timestamp - (time * 1 hours) ;
-            ticket.actArr = block.timestamp - (time * 1 hours) ;
-            ticketsToBeSetteled[i] = ticket;
-
-        }
-        allFlightDetailsMap[_flightNumber].allTicketsInTheFlight = ticketsToBeSetteled;
-        Ticket memory ticket = bookingHistory[msg.sender][0];
-        ticket.actDep = block.timestamp - (time * 1 hours) ;
-        ticket.actArr = block.timestamp - (time * 1 hours) ;
-        uint deptTimeBookingHistory = bookingHistory[msg.sender][0].actDep;
-        console.log("Time updated to :", deptTimeBookingHistory);
+    function setTestModeON() public {
+        isTestMode = true;
     }
+
+    function setTestModeOFF() public {
+        isTestMode = false;
+    }
+
+
 
 //-------------------------------------------------------- Utility functions ------------------------------------------------------------------------------------------------
 
@@ -493,7 +510,7 @@ contract AirlineManagement {
         return penaltyAmount;
     }
 
-    function getArrTime(uint _flightNumber) public view returns (uint) {
+    function getArrTime(uint _flightNumber) internal view returns (uint) {
         return allFlightDetailsMap[_flightNumber].arrivalTime;
     }
 
@@ -536,9 +553,9 @@ contract AirlineManagement {
         return penaltyPercent;
     }
 
-    function getbalance(address account) public returns(uint balance){
-        return account.balance;
-    }
+   // function getbalance(address add) public returns(uint balance){
+     //   return add.balance;
+   // }
 
 
 
